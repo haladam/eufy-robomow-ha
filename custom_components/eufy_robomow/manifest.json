@@ -1,7 +1,7 @@
 {
   "domain": "eufy_robomow",
   "name": "Eufy Robomow",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "config_flow": true,
   "documentation": "https://github.com/haladam/eufy-robomow-ha",
   "issue_tracker": "https://github.com/haladam/eufy-robomow-ha/issues",

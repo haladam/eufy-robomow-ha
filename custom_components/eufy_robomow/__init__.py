@@ -34,6 +34,8 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [
     Platform.LAWN_MOWER,
     Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.DEVICE_TRACKER,
     Platform.NUMBER,
     Platform.SELECT,   # no-op when no cloud client (handled in select.py)
     Platform.SWITCH,

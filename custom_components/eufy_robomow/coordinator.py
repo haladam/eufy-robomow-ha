@@ -101,6 +101,25 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     # ── polling ───────────────────────────────────────────────────────────────
 
+    def _local_poll(self) -> dict:
+        """status() plus a request for the push-only DPs 107/108.
+
+        The mower omits DP107 (robot_status) and DP108 (battery_status) from
+        status replies and only sends them as pushed reports. Ask it to
+        re-report them; if it does not answer, the cloud value (≤5 min old)
+        is used instead.
+        """
+        result = self._device.status()
+        if not isinstance(result, dict) or "Error" in result:
+            return result
+        try:
+            extra = self._device.updatedps([107, 108])
+            if isinstance(extra, dict) and isinstance(extra.get("dps"), dict):
+                result.setdefault("dps", {}).update(extra["dps"])
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("updatedps(107, 108) failed: %s", exc)
+        return result
+
     async def _async_update_data(self) -> dict:
         """Fetch DPS from device (local) and optionally from cloud.
 
@@ -119,7 +138,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         """
         # ── 1. Local DPS (every POLL_INTERVAL seconds) ────────────────────────
         try:
-            result = await self.hass.async_add_executor_job(self._device.status)
+            result = await self.hass.async_add_executor_job(self._local_poll)
         except Exception as exc:  # noqa: BLE001
             self._consecutive_errors += 1
             if self._consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
@@ -233,7 +252,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 sorted(new_keys, key=_dp_sort_key),
             )
             for k in sorted(new_keys, key=_dp_sort_key):
-                _LOGGER.info("  DP%s = %r (%s)", k, dps[k], type(dps[k]).__name__)
+                _LOGGER.debug("  DP%s = %r (%s)", k, dps[k], type(dps[k]).__name__)
             # Pass the current full dps dict so callbacks don't read stale data
             for cb in list(self._new_dp_callbacks):
                 cb(dps)

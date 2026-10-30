@@ -25,14 +25,19 @@ from .const import (
     DEFAULT_MODEL,
     DP_TASK_ACTIVE,
     DP_PAUSED,
-    DP_PROGRESS,
     CMD_START,
     CMD_PAUSE,
     CMD_RESUME,
     CMD_DOCK,
-    RETURNING_THRESHOLD,
 )
 from .coordinator import EufyMowerCoordinator
+from .decoders import (
+    DP_BATTERY_STATUS,
+    DP_MAP_SAVE_PROGRESS,
+    DP_ROBOT_STATUS,
+    decode_battery_status,
+    decode_robot_status,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,26 +88,34 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     @property
     def activity(self) -> LawnMowerActivity:
         dps = self.coordinator.data
-        dp1   = dps.get(DP_TASK_ACTIVE, False)
-        dp2   = dps.get(DP_PAUSED,      False)
-        dp118 = dps.get(DP_PROGRESS,    0)
+        dp1   = dps.get(DP_TASK_ACTIVE, False)   # fresh (local)
+        dp2   = dps.get(DP_PAUSED,      False)   # fresh (local)
+        mission = decode_robot_status(dps.get(DP_ROBOT_STATUS))
+        battery = decode_battery_status(dps.get(DP_BATTERY_STATUS))
+        on_station = battery.charger_connected if battery else None
+
+        if mission is not None and mission.error:
+            return LawnMowerActivity.ERROR
 
         # Paused: task active but movement stopped
         if dp1 and dp2:
             return LawnMowerActivity.PAUSED
 
-        if dp1 and not dp2:
-            # DP118 5–99 → mower returning to base
-            # DP118=100 while DP1=True means briefly docked mid-session for
-            # charging (will resume); treat as MOWING, not RETURNING.
-            if RETURNING_THRESHOLD <= dp118 < 100:
-                try:
-                    return LawnMowerActivity.RETURNING
-                except AttributeError:
-                    return LawnMowerActivity.MOWING
+        # Driving home: DP107 says "recharge" and the charger has no contact yet.
+        # Sending the mower home sets DP1=False, so check this before DP1.
+        if mission is not None and mission.is_returning and on_station is False:
+            return LawnMowerActivity.RETURNING
+
+        if dp1:
+            # DP1 stays True while the mower docks mid-session to recharge.
+            if on_station and (mission is None or not mission.is_mowing):
+                return LawnMowerActivity.DOCKED
+            # Legacy fallback when DP107 is unavailable: DP118 (map save) runs
+            # between the end of mowing and the drive home.
+            if mission is None and 5 <= dps.get(DP_MAP_SAVE_PROGRESS, 0) < 100:
+                return LawnMowerActivity.RETURNING
             return LawnMowerActivity.MOWING
 
-        # DP1 absent or False → no active session → docked / idle
         return LawnMowerActivity.DOCKED
 
     # ── commands ──────────────────────────────────────────────────────────────

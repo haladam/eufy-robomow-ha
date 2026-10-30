@@ -18,6 +18,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfLength, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -26,16 +27,33 @@ from .const import (
     DOMAIN,
     CONF_DEVICE_ID,
     DP_BATTERY,
-    DP_AREA,
     DP_NETWORK,
-    DP_PROGRESS,
-    DP_TOTAL_TIME,
     DP_SIGNAL,
     DP_LIVE_VIEW,
     DP_TASK_ACTIVE,
     GENERIC_SENSOR_PREFIX,
 )
 from .coordinator import EufyMowerCoordinator
+from .decoders import (
+    DP_BLADE_USED,
+    DP_GPS_INFO,
+    DP_MAP_SAVE_PROGRESS,
+    DP_ROBOT_STATUS,
+    DP_BATTERY_STATUS,
+    DP_STATION_USED,
+    DP_WORK_MODE,
+    DP_EDGE_TRIM,
+    DP_WORK_ANGLE_ENABLED,
+    DP_WORK_ANGLE,
+    DP_CELLULAR_ENABLED,
+    DP_GPS_ANTI_THEFT,
+    MISSIONS,
+    OTHER,
+    PHASES,
+    WORK_MODES,
+    decode_robot_status,
+    decode_work_mode,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +80,30 @@ EXCLUDED_DPS = {
     "133",  # Real lawn map    → dedicated Switch entity
     "134",  # Network          → dedicated Network sensor
     "141",  # Mow yellow grass → dedicated Switch entity
+    # Raw/bool DPs with decoded dedicated entities
+    DP_ROBOT_STATUS,        # 107 → Task / Task Phase sensors, Problem binary sensor
+    DP_BATTERY_STATUS,      # 108 → On Charging Station binary sensor
+    DP_GPS_INFO,            # 142 → device tracker
+    DP_WORK_MODE,           # 154 → Mowing Mode sensor
+    DP_EDGE_TRIM,           # 128 → binary sensor
+    DP_WORK_ANGLE_ENABLED,  # 130 → binary sensor (angle in attributes)
+    DP_WORK_ANGLE,          # 131
+    DP_CELLULAR_ENABLED,    # 137 → binary sensor
+    DP_GPS_ANTI_THEFT,      # 140 → binary sensor
+    "102",  # device info → device page (serial / firmware); contains network identity
+    "135",  # SIM card identifiers — never exposed
 }
+
+# Generic "DPxxx" entities created by earlier versions for DPs that now have
+# decoded entities, and sensors whose meaning was wrong. Removed on setup.
+OBSOLETE_UNIQUE_SUFFIXES = (
+    [f"generic_{dp}" for dp in (
+        DP_ROBOT_STATUS, DP_BATTERY_STATUS, DP_GPS_INFO, DP_WORK_MODE, DP_EDGE_TRIM,
+        DP_WORK_ANGLE_ENABLED, DP_WORK_ANGLE, DP_CELLULAR_ENABLED, DP_GPS_ANTI_THEFT,
+        "102", "135",
+    )]
+    + ["mowed_area", "total_time"]
+)
 
 # Cloud setting keys that have dedicated entities — exclude from generic sensors
 # to avoid duplicating values that are already well-represented.
@@ -95,34 +136,37 @@ SENSORS: tuple[EufySensorDescription, ...] = (
         icon="mdi:battery",
     ),
     EufySensorDescription(
-        key="mowed_area",
-        dp=DP_AREA,
-        name="Mowed Area",
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement="units",
-        icon="mdi:grass",
-    ),
-    EufySensorDescription(
-        key="total_time",
-        dp=DP_TOTAL_TIME,
-        name="Total Mow Time",
+        # DP126 mow_blade_used_time (minutes since the blades were replaced).
+        # Previously mislabelled "Mowed Area". Resets when blades are replaced.
+        key="blade_used_time",
+        dp=DP_BLADE_USED,
+        name="Blade Usage",
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfTime.HOURS,
-        icon="mdi:clock-outline",
+        suggested_display_precision=1,
+        icon="mdi:saw-blade",
     ),
     EufySensorDescription(
+        # DP125 base_station_used_time (minutes). Previously mislabelled
+        # "Total Mow Time" with a guessed 6.6 s/unit factor.
+        key="station_used_time",
+        dp=DP_STATION_USED,
+        name="Base Station Usage",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfTime.HOURS,
+        suggested_display_precision=1,
+        icon="mdi:home-lightning-bolt-outline",
+    ),
+    EufySensorDescription(
+        # DP118 save_map_process: progress of the map save that ends every task.
         key="progress",
-        dp=DP_PROGRESS,
-        # DP118 meaning:
-        #   0       = idle / actively mowing  (not a useful progress value)
-        #   1–99    = returning to base       (real progress toward dock)
-        #   100     = docked / session done
-        # During mowing we return None so HA shows "Unknown" instead of 0%.
-        name="Return Progress",
+        dp=DP_MAP_SAVE_PROGRESS,
+        name="Map Save Progress",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
-        icon="mdi:home-import-outline",
+        icon="mdi:content-save-outline",
     ),
     EufySensorDescription(
         key="network",
@@ -133,11 +177,11 @@ SENSORS: tuple[EufySensorDescription, ...] = (
     EufySensorDescription(
         key="signal",
         dp=DP_SIGNAL,
-        name="Signal Strength",
-        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        # DP109 wifi_signal_strength is a percentage, not dBm
+        name="Wi-Fi Signal",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="dBm",
-        icon="mdi:signal",
+        native_unit_of_measurement=PERCENTAGE,
+        icon="mdi:wifi",
     ),
     EufySensorDescription(
         key="live_view",
@@ -265,7 +309,20 @@ async def async_setup_entry(
     entities.append(EufyMowingProgressSensor(coordinator, entry))
     entities.append(EufySessionDistanceSensor(coordinator, entry))
     entities.append(EufyCoverageSensor(coordinator, entry))
+    entities.append(EufyTaskSensor(coordinator, entry))
+    entities.append(EufyTaskPhaseSensor(coordinator, entry))
+    entities.append(EufyMowingModeSensor(coordinator, entry))
     async_add_entities(entities)
+
+    # Remove raw "DPxxx" sensors that are now decoded elsewhere, and the old
+    # mislabelled Mowed Area / Total Mow Time sensors.
+    registry = er.async_get(hass)
+    device_id = entry.data[CONF_DEVICE_ID]
+    for suffix in OBSOLETE_UNIQUE_SUFFIXES:
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{device_id}_{suffix}")
+        if entity_id:
+            _LOGGER.debug("Removing obsolete entity %s", entity_id)
+            registry.async_remove(entity_id)
 
     # Track which DP IDs already have a generic sensor so we never duplicate.
     # Seed with the DPs that have dedicated entities.
@@ -358,25 +415,8 @@ class EufySensor(CoordinatorEntity[EufyMowerCoordinator], SensorEntity):
         raw = self.coordinator.data.get(self.entity_description.dp)
         if raw is None:
             return None
-        # Convert DP125 raw units → hours
-        if self.entity_description.dp == DP_TOTAL_TIME:
-            return round((raw * DP125_SECONDS_PER_UNIT) / 3600, 1)
-        # Convert DP109 raw signal → negative dBm (device sends 58, means -58 dBm)
-        if self.entity_description.dp == DP_SIGNAL:
-            return -raw
-        # DP118 "Return Progress":
-        #   0 = idle / mowing — not a meaningful progress value, return None
-        #       so HA shows "Unknown" rather than a misleading 0%.
-        #   1–99 = returning to base (real % of journey back to dock)
-        #   100  = docked / fully done
-        if self.entity_description.dp == DP_PROGRESS:
-            if raw == 0:
-                # Show None only when a task is actually running (mowing).
-                # When truly idle (DP1=False) leave as 0 so the sensor has a value.
-                dp1 = self.coordinator.data.get(DP_TASK_ACTIVE, False)
-                if dp1:
-                    return None  # actively mowing — no return progress yet
-            return raw
+        if self.entity_description.dp in (DP_BLADE_USED, DP_STATION_USED):
+            return round(raw / 60, 2) if isinstance(raw, (int, float)) else None
         return raw
 
 
@@ -514,3 +554,78 @@ class EufyGenericSensor(CoordinatorEntity[EufyMowerCoordinator], SensorEntity):
     def _handle_update(self) -> None:
         """Handle coordinator update."""
         self.async_write_ha_state()
+
+
+# ── Decoded raw DPs ───────────────────────────────────────────────────────────
+
+class _EufyDecodedSensor(CoordinatorEntity[EufyMowerCoordinator], SensorEntity):
+    """Base for sensors decoded from a raw protobuf DP."""
+
+    _attr_has_entity_name = True
+    _key: str = ""
+
+    def __init__(self, coordinator: EufyMowerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_{self._key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.data[CONF_DEVICE_ID])},
+        )
+
+
+class EufyTaskSensor(_EufyDecodedSensor):
+    """Current task from DP107 robot_status (whole lawn, zone, edge, returning…)."""
+
+    _key = "task"
+    _attr_name = "Task"
+    _attr_icon = "mdi:clipboard-play-outline"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = sorted(set(MISSIONS.values()) | {OTHER})
+
+    @property
+    def native_value(self) -> str | None:
+        status = decode_robot_status(self.coordinator.data.get(DP_ROBOT_STATUS))
+        return status.mission_name if status else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        status = decode_robot_status(self.coordinator.data.get(DP_ROBOT_STATUS))
+        if not status:
+            return None
+        return {
+            "state": status.state_name,
+            "error": status.error,
+            "mission_code": status.mission,
+        }
+
+
+class EufyTaskPhaseSensor(_EufyDecodedSensor):
+    """Sub-step of the current task from DP107 (leaving station, relocating, saving map…)."""
+
+    _key = "task_phase"
+    _attr_name = "Task Phase"
+    _attr_icon = "mdi:progress-clock"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = sorted(set(PHASES.values()) | {OTHER})
+
+    @property
+    def native_value(self) -> str | None:
+        status = decode_robot_status(self.coordinator.data.get(DP_ROBOT_STATUS))
+        return status.phase_name if status else None
+
+
+class EufyMowingModeSensor(_EufyDecodedSensor):
+    """Mowing mode selected in the Eufy app, from DP154 (entire / zone / box).
+
+    This is the app's selection, not the running task. Starting from Home
+    Assistant (DP1) is expected to use this mode — not yet confirmed.
+    """
+
+    _key = "mowing_mode"
+    _attr_name = "Mowing Mode"
+    _attr_icon = "mdi:texture-box"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = sorted(set(WORK_MODES.values()) | {OTHER})
+
+    @property
+    def native_value(self) -> str | None:
+        return decode_work_mode(self.coordinator.data.get(DP_WORK_MODE))
