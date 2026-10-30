@@ -6,7 +6,7 @@ A Home Assistant custom integration for the **Eufy E15** and **E18** robotic law
 
 > Fork of [jnicolaes/eufy-robomow-ha](https://github.com/jnicolaes/eufy-robomow-ha) with these changes:
 > - Model (E15/E18), serial number and firmware are detected from the mower instead of always showing "E15".
-> - Decoded entities: **Task** and **Task Phase** (whole lawn, zone, edge, returning…), **Mowing Mode** selected in the app (entire/zone/box), **On Charging Station**, **Problem**, GPS **Location** tracker, and read-only Edge Trimming / Fixed Mowing Angle / Cellular / GPS Anti-Theft.
+> - Decoded entities: **Task** and **Task Phase** (whole lawn, zone, edge, returning…), **Mowing Mode** selected in the app (entire/zone/box), **On Charging Station**, **Problem**, GPS **Location** tracker, **Firmware** (all component versions as attributes), and read-only Edge Trimming / Fixed Mowing Angle / Cellular / GPS Anti-Theft.
 > - Corrected sensors (names from the mower's Tuya schema): DP126 is **Blade Usage** (was "Mowed Area"), DP125 is **Base Station Usage** (was "Total Mow Time"), DP109 is **Wi-Fi Signal** in % (was dBm), DP118 is **Map Save Progress** (was "Return Progress"). The old entities are removed automatically.
 > - Mower state uses the mower's own task status, so Returning and Error are reported properly.
 > - Zone mowing: still not supported. Starting from HA uses whatever mode is selected in the app (see Mowing Mode).

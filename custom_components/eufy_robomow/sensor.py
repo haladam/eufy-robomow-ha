@@ -16,7 +16,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfLength, UnitOfTime
+from homeassistant.const import EntityCategory, PERCENTAGE, UnitOfLength, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -35,6 +35,8 @@ from .const import (
 )
 from .coordinator import EufyMowerCoordinator
 from .decoders import (
+    DP_FIRMWARE,
+    decode_firmware,
     DP_BLADE_USED,
     DP_GPS_INFO,
     DP_MAP_SAVE_PROGRESS,
@@ -90,6 +92,7 @@ EXCLUDED_DPS = {
     DP_WORK_ANGLE,          # 131
     DP_CELLULAR_ENABLED,    # 137 → binary sensor
     DP_GPS_ANTI_THEFT,      # 140 → binary sensor
+    DP_FIRMWARE,            # 129 → Firmware sensor
     "102",  # device info → device page (serial / firmware); contains network identity
     "135",  # SIM card identifiers — never exposed
 }
@@ -100,7 +103,7 @@ OBSOLETE_UNIQUE_SUFFIXES = (
     [f"generic_{dp}" for dp in (
         DP_ROBOT_STATUS, DP_BATTERY_STATUS, DP_GPS_INFO, DP_WORK_MODE, DP_EDGE_TRIM,
         DP_WORK_ANGLE_ENABLED, DP_WORK_ANGLE, DP_CELLULAR_ENABLED, DP_GPS_ANTI_THEFT,
-        "102", "135",
+        DP_FIRMWARE, "102", "135",
     )]
     + ["mowed_area", "total_time"]
 )
@@ -312,6 +315,7 @@ async def async_setup_entry(
     entities.append(EufyTaskSensor(coordinator, entry))
     entities.append(EufyTaskPhaseSensor(coordinator, entry))
     entities.append(EufyMowingModeSensor(coordinator, entry))
+    entities.append(EufyFirmwareSensor(coordinator, entry))
     async_add_entities(entities)
 
     # Remove raw "DPxxx" sensors that are now decoded elsewhere, and the old
@@ -629,3 +633,23 @@ class EufyMowingModeSensor(_EufyDecodedSensor):
     @property
     def native_value(self) -> str | None:
         return decode_work_mode(self.coordinator.data.get(DP_WORK_MODE))
+
+
+class EufyFirmwareSensor(_EufyDecodedSensor):
+    """Main firmware version from DP129; all component versions as attributes."""
+
+    _key = "firmware"
+    _attr_name = "Firmware"
+    _attr_icon = "mdi:chip"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> str | None:
+        versions = decode_firmware(self.coordinator.data.get(DP_FIRMWARE))
+        if not versions:
+            return None
+        return versions.get("main") or next(iter(versions.values()))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return decode_firmware(self.coordinator.data.get(DP_FIRMWARE))

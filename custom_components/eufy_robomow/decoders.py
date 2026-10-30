@@ -28,6 +28,7 @@ DP_GPS_ANTI_THEFT = "140"  # bool
 DP_STATION_USED = "125"    # int, minutes
 DP_BLADE_USED = "126"      # int, minutes since blades were replaced
 DP_MAP_SAVE_PROGRESS = "118"  # int, 0–100 %
+DP_FIRMWARE = "129"        # raw: firmware versions of the mower's components
 
 
 # ── generic protobuf parsing ──────────────────────────────────────────────────
@@ -272,3 +273,29 @@ def decode_work_mode(value: Any) -> str | None:
     if msg is None:
         return None
     return WORK_MODES.get(_int(msg, 3), OTHER)
+
+
+# ── DP129 firmware versions ───────────────────────────────────────────────────
+# Nine string fields. Field 2 matches the main firmware in DP102 and the app;
+# field 9 is the LTE modem's AT+CGMR reply. The other boards are unnamed in
+# any known source, so they are reported by field number.
+
+def decode_firmware(value: Any) -> dict[str, str] | None:
+    msg = _decode(value)
+    if not msg:
+        return None
+    out: dict[str, str] = {}
+    for field in sorted(msg):
+        raw = msg[field][-1]
+        if not isinstance(raw, bytes):
+            continue
+        text = raw.decode(errors="ignore").strip()
+        if not text:
+            continue
+        if text.startswith("+CGMR:"):
+            out["modem"] = text.removeprefix("+CGMR:").strip()
+        elif field == 2:
+            out["main"] = text
+        else:
+            out[f"component_{field}"] = text
+    return out or None
