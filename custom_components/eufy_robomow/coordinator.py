@@ -33,7 +33,7 @@ _MAX_CONSECUTIVE_ERRORS = 5
 
 
 class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
-    """Polls the Eufy E15 via Tuya local protocol every POLL_INTERVAL seconds.
+    """Polls the Eufy mower via Tuya local protocol every POLL_INTERVAL seconds.
 
     If an EufyCloudClient is provided, cloud DPS are also fetched every
     CLOUD_POLL_INTERVAL seconds (default 5 min).  ALL raw cloud DPS are merged

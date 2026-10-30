@@ -21,6 +21,44 @@ CONF_DEVICE_ID = "device_id"
 CONF_LOCAL_KEY = "local_key"
 CONF_EUFY_EMAIL = "eufy_email"  # optional — enables cloud settings
 CONF_EUFY_PASSWORD = "eufy_password"  # optional — enables cloud settings
+CONF_MODEL = "model"  # detected model, e.g. "E15" / "E18"
+CONF_PRODUCT_NAME = "product_name"  # raw product name reported by the cloud
+
+# ── Model detection ───────────────────────────────────────────────────────────
+# E15 and E18 share hardware and DPS layout (25–75 mm cut height, same app
+# settings); they differ only in max mapping area. Eufy SKUs embed the model:
+#   T2880xx → E15,  T2801xx → E18
+DEFAULT_MODEL = "E15/E18"
+MODEL_BY_SKU: dict[str, str] = {
+    "T2880": "E15",
+    "T2801": "E18",
+}
+
+
+def detect_model(device: dict) -> str | None:
+    """Best-effort model detection from a Tuya cloud device dict.
+
+    Checks the SKU code first (most reliable), then an explicit "E<nn>" token
+    in the product name. Returns None if nothing recognisable is found.
+    """
+    import re
+
+    fields = [
+        str(device.get(k) or "")
+        for k in ("productName", "name", "model", "productModel", "category")
+    ]
+    text = " ".join(fields).upper()
+
+    for sku, model in MODEL_BY_SKU.items():
+        if sku in text:
+            return model
+
+    # Prefer the product name over the user-editable device name
+    for field in fields[:1] + fields[2:] + fields[1:2]:
+        match = re.search(r"\b([EC]\d{2})\b", field.upper())
+        if match:
+            return match.group(1)
+    return None
 
 # ── Cloud settings poll interval ───────────────────────────────────────────────
 # Cloud settings are fetched at most once every N seconds (much slower than local).
@@ -64,7 +102,7 @@ PAD_DIRECTION_MAX = 359  # degrees (full rotation)
 PAD_DIRECTION_STEP = 1  # degrees
 
 # ── DPS READ (status) ──────────────────────────────────────────────────────────
-# Confirmed via live monitoring of Eufy E15 (Tuya v3.5)
+# Confirmed via live monitoring of Eufy E15 (Tuya v3.5); E18 uses the same DPS
 
 DP_TASK_ACTIVE = "1"  # bool  True = a mowing/returning session is running
 DP_PAUSED = "2"  # bool  True = session paused, False = actively moving

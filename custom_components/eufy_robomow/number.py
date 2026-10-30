@@ -65,7 +65,7 @@ async def async_setup_entry(
 
 
 class EufyCutHeightNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity):
-    """Adjustable cut height for the Eufy E15 (local DPS 110)."""
+    """Adjustable cut height for the Eufy mower (local DPS 110)."""
 
     _attr_has_entity_name = True
     _attr_name = "Cut Height"
@@ -97,7 +97,7 @@ class EufyCutHeightNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity)
 
 
 class EufyVolumeNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity):
-    """Speaker volume for the Eufy E15 (local DPS 26, 0–100 %)."""
+    """Speaker volume for the Eufy mower (local DPS 26, 0–100 %)."""
 
     _attr_has_entity_name = True
     _attr_name = "Volume"
@@ -181,7 +181,7 @@ class EufyEdgeDistanceNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEnti
 
 
 class EufyPadDirectionNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity):
-    """Mowing path direction for the Eufy E15.
+    """Mowing path direction for the Eufy mower.
 
     DP155 field 4 stores the mowing angle (0–359°) in sub-field f2.f1.
     The app shows a rotary control for a full rotation.

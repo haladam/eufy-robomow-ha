@@ -2,7 +2,7 @@
 
 Authenticates via Eufy/Tuya mobile API (same flow as eufy-clean-local-key-grabber)
 and reads/writes DP155, a base64-encoded protobuf blob that stores the five
-cloud-managed settings for the E15:
+cloud-managed settings for the E15/E18:
 
     field 1  (message) : const sub-msg {field1: 40}   ← sub-message, NOT bare varint
     field 2  (message) : travel speed  — empty = slow, {1:1} = normal, {1:2} = fast

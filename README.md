@@ -4,6 +4,8 @@
 
 A Home Assistant custom integration for the **Eufy E15** and **E18** robotic lawn mowers.
 
+> Fork of [jnicolaes/eufy-robomow-ha](https://github.com/jnicolaes/eufy-robomow-ha). Changes: the mower model (E15/E18) is now detected from your Eufy account instead of always showing "E15"; existing installs are updated automatically on the next restart.
+
 Control and monitor your Eufy mower directly from Home Assistant over your local network, with cloud-synced settings pulled straight from your Eufy account — no extra tools or manual key extraction required.
 
 ---
@@ -51,7 +53,7 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 ### Via HACS (recommended)
 
 1. Open HACS → **Integrations** → ⋮ → **Custom repositories**
-2. Add URL: `https://github.com/jnicolaes/eufy-robomow-ha` — category: **Integration**
+2. Add URL: `https://github.com/haladam/eufy-robomow-ha` — category: **Integration**
 3. Search for **Eufy Robomow** and install
 4. Restart Home Assistant
 

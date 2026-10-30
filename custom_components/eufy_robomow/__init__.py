@@ -1,4 +1,4 @@
-"""Eufy Robomow — Home Assistant integration for the Eufy E15 robot mower.
+"""Eufy Robomow — Home Assistant integration for Eufy E-series robot mowers (E15, E18).
 
 Protocol: Tuya local v3.5 over TCP port 6668.
 Requires: device_id + local_key (obtainable via eufy-clean-local-key-grabber).
@@ -20,6 +20,10 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
+    CONF_MODEL,
+    CONF_PRODUCT_NAME,
+    DEFAULT_MODEL,
+    detect_model,
 )
 from .coordinator import EufyMowerCoordinator
 
@@ -49,6 +53,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _LOGGER.debug("Cloud client created for device %s", entry.data[CONF_DEVICE_ID])
 
+    # Entries created by older versions have no stored model (it used to be
+    # hardcoded to "E15"). Look it up once from the cloud and persist it.
+    if cloud_client is not None and not entry.data.get(CONF_MODEL):
+        await _async_backfill_model(hass, entry, cloud_client)
+
     coordinator = EufyMowerCoordinator(
         hass,
         host=entry.data[CONF_HOST],
@@ -64,6 +73,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def _async_backfill_model(hass: HomeAssistant, entry: ConfigEntry, cloud_client) -> None:
+    """Detect and store the model for an existing entry. Never raises."""
+    device_id = entry.data[CONF_DEVICE_ID]
+    try:
+        devices = await hass.async_add_executor_job(cloud_client.list_all_devices)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Model detection skipped (cloud unavailable): %s", exc)
+        return
+
+    device = next((d for d in devices if d.get("devId") == device_id), None)
+    if device is None:
+        _LOGGER.debug("Model detection: device %s not found in cloud list", device_id)
+        return
+
+    model = detect_model(device)
+    _LOGGER.info(
+        "Detected Eufy mower model %s (productName=%r)",
+        model or "unknown", device.get("productName"),
+    )
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_MODEL: model or DEFAULT_MODEL,
+            CONF_PRODUCT_NAME: device.get("productName") or "",
+        },
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

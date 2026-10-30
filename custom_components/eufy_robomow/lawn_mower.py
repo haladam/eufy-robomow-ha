@@ -18,6 +18,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     CONF_DEVICE_ID,
+    CONF_MODEL,
+    CONF_PRODUCT_NAME,
+    DEFAULT_MODEL,
     DP_TASK_ACTIVE,
     DP_PAUSED,
     DP_PROGRESS,
@@ -42,7 +45,7 @@ async def async_setup_entry(
 
 
 class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity):
-    """Represents the Eufy E15 robot mower."""
+    """Represents a Eufy E-series (E15/E18) robot mower."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "lawn_mower"
@@ -61,11 +64,14 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_mower"
+        model = entry.data.get(CONF_MODEL) or DEFAULT_MODEL
+        product_name = entry.data.get(CONF_PRODUCT_NAME) or None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.data[CONF_DEVICE_ID])},
-            name="Eufy Robomow E15",
+            name=f"Eufy Robomow {model}",
             manufacturer="Eufy (Anker)",
-            model="E15",
+            model=model,
+            model_id=product_name if product_name and product_name != model else None,
         )
 
     # ── activity ──────────────────────────────────────────────────────────────

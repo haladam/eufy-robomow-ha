@@ -24,6 +24,10 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
+    CONF_MODEL,
+    CONF_PRODUCT_NAME,
+    DEFAULT_MODEL,
+    detect_model,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -163,7 +167,14 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(device_id)
                 self._abort_if_unique_id_configured()
 
-                device_name = device.get("name") or device.get("productName") or "Eufy E15"
+                model = detect_model(device) or DEFAULT_MODEL
+                _LOGGER.debug(
+                    "Selected device %s: productName=%r name=%r → model %s",
+                    device_id, device.get("productName"), device.get("name"), model,
+                )
+                device_name = (
+                    device.get("name") or device.get("productName") or f"Eufy {model}"
+                )
                 return self.async_create_entry(
                     title=f"{device_name} ({host})",
                     data={
@@ -172,6 +183,8 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_LOCAL_KEY:     local_key,
                         CONF_EUFY_EMAIL:    self._email,
                         CONF_EUFY_PASSWORD: self._password,
+                        CONF_MODEL:         model,
+                        CONF_PRODUCT_NAME:  device.get("productName") or "",
                     },
                 )
 
