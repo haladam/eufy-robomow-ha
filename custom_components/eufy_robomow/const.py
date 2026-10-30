@@ -23,6 +23,8 @@ CONF_EUFY_EMAIL = "eufy_email"  # optional — enables cloud settings
 CONF_EUFY_PASSWORD = "eufy_password"  # optional — enables cloud settings
 CONF_MODEL = "model"  # detected model, e.g. "E15" / "E18"
 CONF_PRODUCT_NAME = "product_name"  # raw product name reported by the cloud
+CONF_SERIAL = "serial"  # serial number from DP102, e.g. "AMP28010…"
+CONF_FIRMWARE = "firmware"  # main firmware version from DP102
 
 # ── Model detection ───────────────────────────────────────────────────────────
 # E15 and E18 share hardware and DPS layout (25–75 mm cut height, same app
@@ -33,6 +35,66 @@ MODEL_BY_SKU: dict[str, str] = {
     "T2880": "E15",
     "T2801": "E18",
 }
+
+
+DP_DEVICE_INFO = "102"  # raw protobuf: 1=firmware, 3=serial, 4=MAC, 5=IP (cloud only)
+
+
+def _pb_strings(data: bytes) -> dict[int, bytes]:
+    """Top-level length-delimited fields of a protobuf message (last wins)."""
+    out: dict[int, bytes] = {}
+    i = 0
+
+    def varint() -> int:
+        nonlocal i
+        result = shift = 0
+        while True:
+            byte = data[i]
+            i += 1
+            result |= (byte & 0x7F) << shift
+            shift += 7
+            if not byte & 0x80:
+                return result
+
+    while i < len(data):
+        key = varint()
+        field, wire = key >> 3, key & 7
+        if wire == 0:
+            varint()
+        elif wire == 1:
+            i += 8
+        elif wire == 5:
+            i += 4
+        elif wire == 2:
+            n = varint()
+            out[field] = data[i:i + n]
+            i += n
+        else:
+            raise ValueError(f"unsupported wire type {wire}")
+    return out
+
+
+def parse_device_info(value) -> dict[str, str]:
+    """Decode DP102 (base64 protobuf) into firmware and serial strings."""
+    import base64
+
+    if not isinstance(value, str) or not value:
+        return {}
+    fields = _pb_strings(base64.b64decode(value))
+    return {
+        "firmware": fields.get(1, b"").decode(errors="ignore"),
+        "serial": fields.get(3, b"").decode(errors="ignore"),
+    }
+
+
+def model_from_serial(serial: str | None) -> str | None:
+    """Map a serial such as "AMP28010F…" to its model via the embedded SKU."""
+    if not serial:
+        return None
+    for sku, model in MODEL_BY_SKU.items():
+        if sku[1:] in serial[:8]:  # "T2801" → "2801" appears as "AMP2801…"
+            return model
+    return None
 
 
 def detect_model(device: dict) -> str | None:

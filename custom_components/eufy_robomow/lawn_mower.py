@@ -20,6 +20,8 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_MODEL,
     CONF_PRODUCT_NAME,
+    CONF_SERIAL,
+    CONF_FIRMWARE,
     DEFAULT_MODEL,
     DP_TASK_ACTIVE,
     DP_PAUSED,
@@ -72,6 +74,8 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             manufacturer="Eufy (Anker)",
             model=model,
             model_id=product_name if product_name and product_name != model else None,
+            serial_number=entry.data.get(CONF_SERIAL) or None,
+            sw_version=entry.data.get(CONF_FIRMWARE) or None,
         )
 
     # ── activity ──────────────────────────────────────────────────────────────

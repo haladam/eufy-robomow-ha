@@ -21,9 +21,11 @@ from .const import (
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
     CONF_MODEL,
-    CONF_PRODUCT_NAME,
-    DEFAULT_MODEL,
-    detect_model,
+    CONF_SERIAL,
+    CONF_FIRMWARE,
+    DP_DEVICE_INFO,
+    model_from_serial,
+    parse_device_info,
 )
 from .coordinator import EufyMowerCoordinator
 
@@ -53,11 +55,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _LOGGER.debug("Cloud client created for device %s", entry.data[CONF_DEVICE_ID])
 
-    # Entries created by older versions have no stored model (it used to be
-    # hardcoded to "E15"). Look it up once from the cloud and persist it.
-    if cloud_client is not None and not entry.data.get(CONF_MODEL):
-        await _async_backfill_model(hass, entry, cloud_client)
-
     coordinator = EufyMowerCoordinator(
         hass,
         host=entry.data[CONF_HOST],
@@ -69,39 +66,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initial data fetch — raises ConfigEntryNotReady if the mower is unreachable
     await coordinator.async_config_entry_first_refresh()
 
+    # Identify the model from the serial number in DP102 (device info, cloud
+    # only). The serial embeds the SKU (AMP2801… = E18), which is more reliable
+    # than the cloud product name. Runs until a model is found.
+    _update_device_identity(hass, entry, coordinator.data or {})
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-async def _async_backfill_model(hass: HomeAssistant, entry: ConfigEntry, cloud_client) -> None:
-    """Detect and store the model for an existing entry. Never raises."""
-    device_id = entry.data[CONF_DEVICE_ID]
+def _update_device_identity(hass: HomeAssistant, entry: ConfigEntry, data: dict) -> None:
+    """Store model, serial and firmware parsed from DP102. Never raises."""
     try:
-        devices = await hass.async_add_executor_job(cloud_client.list_all_devices)
+        info = parse_device_info(data.get(DP_DEVICE_INFO))
     except Exception as exc:  # noqa: BLE001
-        _LOGGER.debug("Model detection skipped (cloud unavailable): %s", exc)
+        _LOGGER.debug("Could not parse DP102 device info: %s", exc)
+        return
+    if not info:
         return
 
-    device = next((d for d in devices if d.get("devId") == device_id), None)
-    if device is None:
-        _LOGGER.debug("Model detection: device %s not found in cloud list", device_id)
-        return
-
-    model = detect_model(device)
-    _LOGGER.info(
-        "Detected Eufy mower model %s (productName=%r)",
-        model or "unknown", device.get("productName"),
-    )
-    hass.config_entries.async_update_entry(
-        entry,
-        data={
-            **entry.data,
-            CONF_MODEL: model or DEFAULT_MODEL,
-            CONF_PRODUCT_NAME: device.get("productName") or "",
-        },
-    )
+    new = dict(entry.data)
+    model = model_from_serial(info.get("serial"))
+    if model and entry.data.get(CONF_MODEL) != model:
+        _LOGGER.info("Detected Eufy mower model %s from serial number", model)
+        new[CONF_MODEL] = model
+    for key, conf in (("serial", CONF_SERIAL), ("firmware", CONF_FIRMWARE)):
+        if info.get(key):
+            new[conf] = info[key]
+    if new != entry.data:
+        hass.config_entries.async_update_entry(entry, data=new)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
